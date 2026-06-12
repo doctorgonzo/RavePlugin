@@ -699,20 +699,26 @@ namespace Oxide.Plugins
                     if (url == null)
                     {
                         box.ServerTogglePlay(false);
+                        boombox.SendNetworkUpdateImmediate();
                     }
                     else
                     {
                         box.ServerTogglePlay(false);
                         box.CurrentRadioIp = url;
-                        box.baseEntity.SendNetworkUpdateImmediate();
-                        timer.Once(0.5f, () =>
+                        boombox.SendNetworkUpdateImmediate();
+                        float delay = 1.0f + (count * 0.25f);
+                        var capturedBox = box;
+                        var capturedBoombox = boombox;
+                        timer.Once(delay, () =>
                         {
-                            if (box != null)
-                                box.ServerTogglePlay(true);
+                            if (capturedBox != null && capturedBoombox != null && !capturedBoombox.IsDestroyed)
+                            {
+                                capturedBox.ServerTogglePlay(true);
+                                capturedBoombox.SendNetworkUpdateImmediate();
+                            }
                         });
                     }
 
-                    boombox.SendNetworkUpdateImmediate();
                     count++;
                 }
             }
