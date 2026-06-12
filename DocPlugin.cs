@@ -130,6 +130,23 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             SaveZoneData();
+            ApplyServerUrlList();
+        }
+
+        // Clients only stream URLs present in boombox.serverurllist; anything
+        // else falls back to default audio. Register our stations there so
+        // every client accepts them (they show up in the boombox UI too).
+        private void ApplyServerUrlList()
+        {
+            if (_config.Stations.Count == 0) return;
+
+            var parts = new List<string>();
+            foreach (var kvp in _config.Stations)
+                parts.Add($"{kvp.Key},{kvp.Value}");
+
+            string list = string.Join(",", parts);
+            ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), "boombox.serverurllist", list);
+            Puts($"Registered {_config.Stations.Count} stations in boombox.serverurllist");
         }
 
         #endregion
