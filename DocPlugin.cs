@@ -97,8 +97,8 @@ namespace Oxide.Plugins
 
         #region State
 
-        private Dictionary<string, List<uint>> _zones = new Dictionary<string, List<uint>>();
-        private Dictionary<string, List<uint>> _boomboxZones = new Dictionary<string, List<uint>>();
+        private Dictionary<string, List<ulong>> _zones = new Dictionary<string, List<ulong>>();
+        private Dictionary<string, List<ulong>> _boomboxZones = new Dictionary<string, List<ulong>>();
         private Timer _patternTimer;
         private string _activePattern;
         private string _activeZone;
@@ -137,7 +137,7 @@ namespace Oxide.Plugins
 
         private void LoadZoneData()
         {
-            var data = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, Dictionary<string, List<uint>>>>(_dataFile);
+            var data = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, Dictionary<string, List<ulong>>>>(_dataFile);
             if (data != null)
             {
                 if (data.ContainsKey("lights"))
@@ -149,7 +149,7 @@ namespace Oxide.Plugins
 
         private void SaveZoneData()
         {
-            var data = new Dictionary<string, Dictionary<string, List<uint>>>
+            var data = new Dictionary<string, Dictionary<string, List<ulong>>>
             {
                 ["lights"] = _zones,
                 ["boomboxes"] = _boomboxZones
@@ -317,7 +317,7 @@ namespace Oxide.Plugins
             foreach (var kvp in _zones)
             {
                 if (zone != null && kvp.Key != zone) continue;
-                foreach (uint id in kvp.Value)
+                foreach (ulong id in kvp.Value)
                 {
                     var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
                     if (entity != null && IsControllableLight(entity))
@@ -615,7 +615,7 @@ namespace Oxide.Plugins
             foreach (var kvp in _zones)
             {
                 if (_activeZone != null && kvp.Key != _activeZone) continue;
-                foreach (uint id in kvp.Value)
+                foreach (ulong id in kvp.Value)
                 {
                     var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
                     if (entity != null && IsControllableLight(entity))
@@ -667,7 +667,7 @@ namespace Oxide.Plugins
         {
             foreach (var kvp in _zones)
             {
-                foreach (uint id in kvp.Value)
+                foreach (ulong id in kvp.Value)
                 {
                     var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
                     if (entity != null && IsControllableLight(entity))
@@ -687,7 +687,7 @@ namespace Oxide.Plugins
             foreach (var kvp in _boomboxZones)
             {
                 if (zone != null && kvp.Key != zone) continue;
-                foreach (uint id in kvp.Value)
+                foreach (ulong id in kvp.Value)
                 {
                     var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
                     var boombox = entity as DeployableBoomBox;
