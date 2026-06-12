@@ -247,6 +247,9 @@ namespace Oxide.Plugins
                 case "patterns":
                     CmdPatterns(player);
                     break;
+                case "inspect":
+                    CmdInspect(player);
+                    break;
                 case "start":
                     CmdStart(player, args);
                     break;
@@ -476,6 +479,45 @@ namespace Oxide.Plugins
 
             if (_activePattern != null)
                 player.ChatMessage($"  Active: <color=#ffcc00>{_activePattern}</color>");
+        }
+
+        private void CmdInspect(BasePlayer player)
+        {
+            RaycastHit hit;
+            if (!Physics.Raycast(player.eyes.HeadRay(), out hit, 10f))
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> Look at a boombox or light (within 10m) and try again.");
+                return;
+            }
+
+            var entity = hit.GetEntity();
+            if (entity == null)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> That's not an entity.");
+                return;
+            }
+
+            ulong id = entity.net.ID.Value;
+            string registeredIn = null;
+            foreach (var kvp in _boomboxZones)
+                if (kvp.Value.Contains(id)) registeredIn = kvp.Key;
+            if (registeredIn == null)
+                foreach (var kvp in _zones)
+                    if (kvp.Value.Contains(id)) registeredIn = kvp.Key;
+
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> <color=#00ffcc>{entity.ShortPrefabName}</color> (id {id})");
+            player.ChatMessage($"  Registered: {(registeredIn != null ? $"<color=#00ff00>yes — zone '{registeredIn}'</color>" : "<color=#ff4444>NO — not in any zone, /rave commands don't touch it</color>")}");
+
+            var boombox = entity as DeployableBoomBox;
+            if (boombox != null)
+            {
+                int cassettes = boombox.inventory?.itemList?.Count ?? 0;
+                string url = boombox.BoxController?.CurrentRadioIp ?? "(none)";
+                bool playing = entity.HasFlag(BaseEntity.Flags.On);
+                player.ChatMessage($"  Cassette inserted: {(cassettes > 0 ? "<color=#ff4444>YES — overrides radio!</color>" : "no")}");
+                player.ChatMessage($"  Playing: {playing}");
+                player.ChatMessage($"  URL: <color=#ffcc00>{url}</color>");
+            }
         }
 
         #endregion
@@ -790,6 +832,7 @@ namespace Oxide.Plugins
             player.ChatMessage("<color=#00ffcc>/rave station <name> [zone]</color> — Play a station");
             player.ChatMessage("<color=#00ffcc>/rave stations</color> — List stations");
             player.ChatMessage("<color=#00ffcc>/rave mute [zone]</color> — Stop music");
+            player.ChatMessage("<color=#00ffcc>/rave inspect</color> — Show state of the boombox you're looking at");
             player.ChatMessage("<color=#ff0044>── Announcements ──</color>");
             player.ChatMessage("<color=#00ffcc>/rave start [seconds]</color> — Countdown + announce (default 5m)");
             player.ChatMessage("<color=#00ffcc>/rave end</color> — Announce rave is over");
