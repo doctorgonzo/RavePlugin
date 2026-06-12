@@ -29,11 +29,12 @@ namespace Oxide.Plugins
             [JsonProperty("Stations")]
             public Dictionary<string, string> Stations { get; set; } = new Dictionary<string, string>
             {
-                ["dnb"] = "http://stream.bassdrive.com/bassdrive.mp3",
-                ["techno"] = "http://stream.technobase.fm/tb.mp3",
-                ["house"] = "http://stream.housetime.fm/ht.mp3",
-                ["ambient"] = "http://ice2.somafm.com/dronezone-128-mp3",
-                ["chillout"] = "http://ice2.somafm.com/illstreet-128-mp3"
+                ["dnb"] = "http://chi.bassdrive.co/;stream/1",
+                ["techno"] = "http://ice1.somafm.com/thetrip-128-mp3",
+                ["house"] = "http://ice1.somafm.com/beatblender-128-mp3",
+                ["ambient"] = "http://ice1.somafm.com/dronezone-128-mp3",
+                ["chillout"] = "http://ice2.somafm.com/spacestation-128-mp3",
+                ["groovy"] = "http://ice1.somafm.com/groovesalad-128-mp3"
             };
 
             [JsonProperty("Countdown sound effect")]
