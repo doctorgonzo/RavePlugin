@@ -1,0 +1,583 @@
+using Newtonsoft.Json;
+using Oxide.Core;
+using Oxide.Core.Configuration;
+using Oxide.Core.Libraries.Covalence;
+using Oxide.Core.Plugins;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace Oxide.Plugins
+{
+    [Info("DocPlugin", "Doc", "0.1.0")]
+    [Description("Rave warehouse controller — manages lights, lasers, and boomboxes in patterns")]
+    public class DocPlugin : RustPlugin
+    {
+        #region Configuration
+
+        private Configuration _config;
+
+        private class Configuration
+        {
+            [JsonProperty("Permission")]
+            public string Permission { get; set; } = "docplugin.dj";
+
+            [JsonProperty("Light scan radius")]
+            public float ScanRadius { get; set; } = 50f;
+
+            [JsonProperty("Stations")]
+            public Dictionary<string, string> Stations { get; set; } = new Dictionary<string, string>
+            {
+                ["dnb"] = "http://stream.bassdrive.com/bassdrive.mp3",
+                ["techno"] = "http://stream.technobase.fm/tb.mp3",
+                ["house"] = "http://stream.housetime.fm/ht.mp3",
+                ["ambient"] = "http://ice2.somafm.com/dronezone-128-mp3",
+                ["chillout"] = "http://ice2.somafm.com/illstreet-128-mp3"
+            };
+
+            [JsonProperty("Patterns")]
+            public Dictionary<string, PatternConfig> Patterns { get; set; } = new Dictionary<string, PatternConfig>
+            {
+                ["strobe"] = new PatternConfig { IntervalMs = 200, Mode = "toggle_all" },
+                ["slow_strobe"] = new PatternConfig { IntervalMs = 500, Mode = "toggle_all" },
+                ["chase"] = new PatternConfig { IntervalMs = 150, Mode = "sequential" },
+                ["wave"] = new PatternConfig { IntervalMs = 300, Mode = "sequential" },
+                ["random"] = new PatternConfig { IntervalMs = 250, Mode = "random" },
+                ["pulse"] = new PatternConfig { IntervalMs = 400, Mode = "pulse" }
+            };
+        }
+
+        private class PatternConfig
+        {
+            [JsonProperty("Interval (ms)")]
+            public int IntervalMs { get; set; } = 200;
+
+            [JsonProperty("Mode")]
+            public string Mode { get; set; } = "toggle_all";
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            _config = new Configuration();
+            SaveConfig();
+        }
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            _config = Config.ReadObject<Configuration>();
+            SaveConfig();
+        }
+
+        protected override void SaveConfig() => Config.WriteObject(_config);
+
+        #endregion
+
+        #region State
+
+        private Dictionary<string, List<uint>> _zones = new Dictionary<string, List<uint>>();
+        private Dictionary<string, List<uint>> _boomboxZones = new Dictionary<string, List<uint>>();
+        private Timer _patternTimer;
+        private string _activePattern;
+        private string _activeZone;
+        private int _chaseIndex;
+        private bool _toggleState;
+        private string _dataFile = "DocPlugin_Zones";
+
+        #endregion
+
+        #region Hooks
+
+        private void Init()
+        {
+            permission.RegisterPermission(_config.Permission, this);
+            LoadZoneData();
+        }
+
+        private void Unload()
+        {
+            StopPattern();
+            SaveZoneData();
+        }
+
+        private void OnServerInitialized()
+        {
+            SaveZoneData();
+        }
+
+        #endregion
+
+        #region Data Persistence
+
+        private void LoadZoneData()
+        {
+            var data = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<string, Dictionary<string, List<uint>>>>(_dataFile);
+            if (data != null)
+            {
+                if (data.ContainsKey("lights"))
+                    _zones = data["lights"];
+                if (data.ContainsKey("boomboxes"))
+                    _boomboxZones = data["boomboxes"];
+            }
+        }
+
+        private void SaveZoneData()
+        {
+            var data = new Dictionary<string, Dictionary<string, List<uint>>>
+            {
+                ["lights"] = _zones,
+                ["boomboxes"] = _boomboxZones
+            };
+            Interface.Oxide.DataFileSystem.WriteObject(_dataFile, data);
+        }
+
+        #endregion
+
+        #region Commands
+
+        [ChatCommand("rave")]
+        private void RaveCommand(BasePlayer player, string command, string[] args)
+        {
+            if (!permission.UserHasPermission(player.UserIDString, _config.Permission))
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> No permission.");
+                return;
+            }
+
+            if (args.Length == 0)
+            {
+                ShowHelp(player);
+                return;
+            }
+
+            switch (args[0].ToLower())
+            {
+                case "scan":
+                    CmdScan(player, args);
+                    break;
+                case "zones":
+                    CmdZones(player);
+                    break;
+                case "clear":
+                    CmdClear(player, args);
+                    break;
+                case "on":
+                    CmdAllLights(player, args, true);
+                    break;
+                case "off":
+                    CmdAllLights(player, args, false);
+                    break;
+                case "pattern":
+                    CmdPattern(player, args);
+                    break;
+                case "stop":
+                    CmdStop(player);
+                    break;
+                case "bpm":
+                    CmdBpm(player, args);
+                    break;
+                case "station":
+                    CmdStation(player, args);
+                    break;
+                case "stations":
+                    CmdStations(player);
+                    break;
+                case "mute":
+                    CmdMute(player, args);
+                    break;
+                case "patterns":
+                    CmdPatterns(player);
+                    break;
+                default:
+                    ShowHelp(player);
+                    break;
+            }
+        }
+
+        #endregion
+
+        #region Subcommands
+
+        private void CmdScan(BasePlayer player, string[] args)
+        {
+            string zone = args.Length > 1 ? args[1].ToLower() : "main";
+            float radius = _config.ScanRadius;
+
+            if (!_zones.ContainsKey(zone))
+                _zones[zone] = new List<uint>();
+            if (!_boomboxZones.ContainsKey(zone))
+                _boomboxZones[zone] = new List<uint>();
+
+            int lightCount = 0;
+            int boomboxCount = 0;
+            var entities = new List<BaseEntity>();
+            Vis.Entities(player.transform.position, radius, entities);
+
+            foreach (var entity in entities)
+            {
+                if (IsControllableLight(entity))
+                {
+                    if (!_zones[zone].Contains(entity.net.ID.Value))
+                    {
+                        _zones[zone].Add(entity.net.ID.Value);
+                        lightCount++;
+                    }
+                }
+                else if (entity is DeployableBoomBox)
+                {
+                    if (!_boomboxZones[zone].Contains(entity.net.ID.Value))
+                    {
+                        _boomboxZones[zone].Add(entity.net.ID.Value);
+                        boomboxCount++;
+                    }
+                }
+            }
+
+            SaveZoneData();
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Scanned zone '<color=#00ffcc>{zone}</color>': found <color=#ffcc00>{lightCount}</color> new lights, <color=#ffcc00>{boomboxCount}</color> new boomboxes (radius {radius}m)");
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Zone totals — lights: {_zones[zone].Count}, boomboxes: {_boomboxZones[zone].Count}");
+        }
+
+        private void CmdZones(BasePlayer player)
+        {
+            if (_zones.Count == 0 && _boomboxZones.Count == 0)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> No zones registered. Use <color=#00ffcc>/rave scan [zone]</color>");
+                return;
+            }
+
+            var allZones = _zones.Keys.Union(_boomboxZones.Keys).Distinct();
+            foreach (var zone in allZones)
+            {
+                int lights = _zones.ContainsKey(zone) ? _zones[zone].Count : 0;
+                int boxes = _boomboxZones.ContainsKey(zone) ? _boomboxZones[zone].Count : 0;
+                player.ChatMessage($"<color=#ff0044>[RAVE]</color> <color=#00ffcc>{zone}</color>: {lights} lights, {boxes} boomboxes");
+            }
+        }
+
+        private void CmdClear(BasePlayer player, string[] args)
+        {
+            if (args.Length > 1)
+            {
+                string zone = args[1].ToLower();
+                _zones.Remove(zone);
+                _boomboxZones.Remove(zone);
+                SaveZoneData();
+                player.ChatMessage($"<color=#ff0044>[RAVE]</color> Cleared zone '<color=#00ffcc>{zone}</color>'");
+            }
+            else
+            {
+                _zones.Clear();
+                _boomboxZones.Clear();
+                SaveZoneData();
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> All zones cleared.");
+            }
+        }
+
+        private void CmdAllLights(BasePlayer player, string[] args, bool on)
+        {
+            string zone = args.Length > 1 ? args[1].ToLower() : null;
+            int count = 0;
+
+            foreach (var kvp in _zones)
+            {
+                if (zone != null && kvp.Key != zone) continue;
+                foreach (uint id in kvp.Value)
+                {
+                    var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
+                    if (entity != null && IsControllableLight(entity))
+                    {
+                        SetLightState(entity, on);
+                        count++;
+                    }
+                }
+            }
+
+            string state = on ? "ON" : "OFF";
+            string scope = zone ?? "all zones";
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Lights <color=#ffcc00>{state}</color> — {count} lights in {scope}");
+        }
+
+        private void CmdPattern(BasePlayer player, string[] args)
+        {
+            if (args.Length < 2)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> Usage: <color=#00ffcc>/rave pattern <name> [zone]</color>");
+                return;
+            }
+
+            string patternName = args[1].ToLower();
+            string zone = args.Length > 2 ? args[2].ToLower() : null;
+
+            if (!_config.Patterns.ContainsKey(patternName))
+            {
+                player.ChatMessage($"<color=#ff0044>[RAVE]</color> Unknown pattern. Available: {string.Join(", ", _config.Patterns.Keys)}");
+                return;
+            }
+
+            StopPattern();
+
+            var pattern = _config.Patterns[patternName];
+            _activePattern = patternName;
+            _activeZone = zone;
+            _chaseIndex = 0;
+            _toggleState = false;
+
+            float interval = pattern.IntervalMs / 1000f;
+
+            _patternTimer = timer.Every(interval, () => RunPattern(pattern));
+
+            string scope = zone ?? "all zones";
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Pattern '<color=#00ffcc>{patternName}</color>' running ({pattern.IntervalMs}ms) on {scope}");
+        }
+
+        private void CmdStop(BasePlayer player)
+        {
+            StopPattern();
+            SetAllLights(true);
+            player.ChatMessage("<color=#ff0044>[RAVE]</color> Stopped. Lights on.");
+        }
+
+        private void CmdBpm(BasePlayer player, string[] args)
+        {
+            if (args.Length < 2 || _activePattern == null)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> Usage: <color=#00ffcc>/rave bpm <value></color> (pattern must be running)");
+                return;
+            }
+
+            int bpm;
+            if (!int.TryParse(args[1], out bpm) || bpm < 30 || bpm > 600)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> BPM must be between 30 and 600.");
+                return;
+            }
+
+            // Convert BPM to interval: one toggle per beat
+            float interval = 60f / bpm;
+
+            StopTimer();
+            var pattern = _config.Patterns[_activePattern];
+            _patternTimer = timer.Every(interval, () => RunPattern(pattern));
+
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Tempo set to <color=#ffcc00>{bpm} BPM</color> ({(int)(interval * 1000)}ms)");
+        }
+
+        private void CmdStation(BasePlayer player, string[] args)
+        {
+            if (args.Length < 2)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> Usage: <color=#00ffcc>/rave station <name> [zone]</color>");
+                return;
+            }
+
+            string stationName = args[1].ToLower();
+            string zone = args.Length > 2 ? args[2].ToLower() : null;
+
+            if (!_config.Stations.ContainsKey(stationName))
+            {
+                player.ChatMessage($"<color=#ff0044>[RAVE]</color> Unknown station. Available: {string.Join(", ", _config.Stations.Keys)}");
+                return;
+            }
+
+            string url = _config.Stations[stationName];
+            int count = SetBoomboxes(url, zone);
+
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Now playing '<color=#00ffcc>{stationName}</color>' on {count} boombox(es)");
+        }
+
+        private void CmdStations(BasePlayer player)
+        {
+            player.ChatMessage("<color=#ff0044>[RAVE]</color> Stations:");
+            foreach (var kvp in _config.Stations)
+                player.ChatMessage($"  <color=#00ffcc>{kvp.Key}</color> — {kvp.Value}");
+        }
+
+        private void CmdMute(BasePlayer player, string[] args)
+        {
+            string zone = args.Length > 1 ? args[1].ToLower() : null;
+            int count = SetBoomboxes(null, zone);
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Muted {count} boombox(es)");
+        }
+
+        private void CmdPatterns(BasePlayer player)
+        {
+            player.ChatMessage("<color=#ff0044>[RAVE]</color> Patterns:");
+            foreach (var kvp in _config.Patterns)
+                player.ChatMessage($"  <color=#00ffcc>{kvp.Key}</color> — {kvp.Value.Mode}, {kvp.Value.IntervalMs}ms");
+
+            if (_activePattern != null)
+                player.ChatMessage($"  Active: <color=#ffcc00>{_activePattern}</color>");
+        }
+
+        #endregion
+
+        #region Pattern Engine
+
+        private void RunPattern(PatternConfig pattern)
+        {
+            var lights = GetActiveLights();
+            if (lights.Count == 0) return;
+
+            switch (pattern.Mode)
+            {
+                case "toggle_all":
+                    _toggleState = !_toggleState;
+                    foreach (var light in lights)
+                        SetLightState(light, _toggleState);
+                    break;
+
+                case "sequential":
+                    for (int i = 0; i < lights.Count; i++)
+                        SetLightState(lights[i], i == _chaseIndex);
+                    _chaseIndex = (_chaseIndex + 1) % lights.Count;
+                    break;
+
+                case "random":
+                    foreach (var light in lights)
+                        SetLightState(light, UnityEngine.Random.value > 0.5f);
+                    break;
+
+                case "pulse":
+                    _toggleState = !_toggleState;
+                    int half = lights.Count / 2;
+                    for (int i = 0; i < lights.Count; i++)
+                    {
+                        bool on = i < half ? _toggleState : !_toggleState;
+                        SetLightState(lights[i], on);
+                    }
+                    break;
+            }
+        }
+
+        private List<BaseEntity> GetActiveLights()
+        {
+            var result = new List<BaseEntity>();
+
+            foreach (var kvp in _zones)
+            {
+                if (_activeZone != null && kvp.Key != _activeZone) continue;
+                foreach (uint id in kvp.Value)
+                {
+                    var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
+                    if (entity != null && IsControllableLight(entity))
+                        result.Add(entity);
+                }
+            }
+
+            return result;
+        }
+
+        private void StopPattern()
+        {
+            StopTimer();
+            _activePattern = null;
+            _activeZone = null;
+            _chaseIndex = 0;
+            _toggleState = false;
+        }
+
+        private void StopTimer()
+        {
+            if (_patternTimer != null)
+            {
+                _patternTimer.Destroy();
+                _patternTimer = null;
+            }
+        }
+
+        #endregion
+
+        #region Light Control
+
+        private bool IsControllableLight(BaseEntity entity)
+        {
+            return entity is CeilingLight
+                || entity is SearchLight
+                || entity is SimpleLight
+                || entity is FlasherLight
+                || entity is SirenLight;
+        }
+
+        private void SetLightState(BaseEntity entity, bool on)
+        {
+            entity.SetFlag(BaseEntity.Flags.On, on);
+            entity.SendNetworkUpdateImmediate();
+        }
+
+        private void SetAllLights(bool on)
+        {
+            foreach (var kvp in _zones)
+            {
+                foreach (uint id in kvp.Value)
+                {
+                    var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
+                    if (entity != null && IsControllableLight(entity))
+                        SetLightState(entity, on);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Boombox Control
+
+        private int SetBoomboxes(string url, string zone)
+        {
+            int count = 0;
+
+            foreach (var kvp in _boomboxZones)
+            {
+                if (zone != null && kvp.Key != zone) continue;
+                foreach (uint id in kvp.Value)
+                {
+                    var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
+                    var boombox = entity as DeployableBoomBox;
+                    if (boombox == null) continue;
+
+                    var box = boombox.BoxController;
+                    if (box == null) continue;
+
+                    if (url == null)
+                    {
+                        box.ServerTogglePlay(false);
+                    }
+                    else
+                    {
+                        box.CurrentRadioIp = url;
+                        box.ServerTogglePlay(true);
+                    }
+
+                    boombox.SendNetworkUpdateImmediate();
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        #endregion
+
+        #region Help
+
+        private void ShowHelp(BasePlayer player)
+        {
+            player.ChatMessage("<color=#ff0044>═══ RAVE CONTROLLER ═══</color>");
+            player.ChatMessage("<color=#00ffcc>/rave scan [zone]</color> — Register nearby lights & boomboxes");
+            player.ChatMessage("<color=#00ffcc>/rave zones</color> — List registered zones");
+            player.ChatMessage("<color=#00ffcc>/rave clear [zone]</color> — Clear zone(s)");
+            player.ChatMessage("<color=#00ffcc>/rave on [zone]</color> — All lights on");
+            player.ChatMessage("<color=#00ffcc>/rave off [zone]</color> — All lights off");
+            player.ChatMessage("<color=#00ffcc>/rave pattern <name> [zone]</color> — Start a pattern");
+            player.ChatMessage("<color=#00ffcc>/rave patterns</color> — List available patterns");
+            player.ChatMessage("<color=#00ffcc>/rave bpm <value></color> — Set pattern tempo");
+            player.ChatMessage("<color=#00ffcc>/rave stop</color> — Stop pattern, lights on");
+            player.ChatMessage("<color=#00ffcc>/rave station <name> [zone]</color> — Play a station");
+            player.ChatMessage("<color=#00ffcc>/rave stations</color> — List stations");
+            player.ChatMessage("<color=#00ffcc>/rave mute [zone]</color> — Stop music");
+        }
+
+        #endregion
+    }
+}
