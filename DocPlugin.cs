@@ -36,6 +36,15 @@ namespace Oxide.Plugins
                 ["chillout"] = "http://ice2.somafm.com/illstreet-128-mp3"
             };
 
+            [JsonProperty("Countdown sound effect")]
+            public string CountdownSound { get; set; } = "assets/prefabs/tools/flare/effects/ignite.prefab";
+
+            [JsonProperty("Rave started sound effect")]
+            public string StartedSound { get; set; } = "assets/prefabs/missions/effects/mission_objective_complete.prefab";
+
+            [JsonProperty("Rave ended sound effect")]
+            public string EndedSound { get; set; } = "";
+
             [JsonProperty("Countdown steps (seconds)")]
             public List<int> CountdownSteps { get; set; } = new List<int> { 300, 120, 60, 30, 10 };
 
@@ -466,7 +475,7 @@ namespace Oxide.Plugins
                 _raveActive = true;
                 string msg = _config.StartedMessage
                     .Replace("{coords}", coords);
-                BroadcastChat(msg);
+                BroadcastChat(msg, _config.StartedSound);
                 player.ChatMessage("<color=#ff0044>[RAVE]</color> Rave is live!");
                 return;
             }
@@ -483,7 +492,7 @@ namespace Oxide.Plugins
                     string msg = _config.AnnounceMessage
                         .Replace("{time}", timeStr)
                         .Replace("{coords}", coords);
-                    BroadcastChat(msg);
+                    BroadcastChat(msg, _config.CountdownSound);
                 });
                 _countdownTimers.Add(t);
             }
@@ -493,7 +502,7 @@ namespace Oxide.Plugins
                 _raveActive = true;
                 string msg = _config.StartedMessage
                     .Replace("{coords}", coords);
-                BroadcastChat(msg);
+                BroadcastChat(msg, _config.StartedSound);
                 _countdownTimers.Clear();
             });
             _countdownTimers.Add(startTimer);
@@ -501,7 +510,7 @@ namespace Oxide.Plugins
             string firstMsg = _config.AnnounceMessage
                 .Replace("{time}", FormatTime(countdown))
                 .Replace("{coords}", coords);
-            BroadcastChat(firstMsg);
+            BroadcastChat(firstMsg, _config.CountdownSound);
             player.ChatMessage($"<color=#ff0044>[RAVE]</color> Countdown started — {FormatTime(countdown)} until showtime.");
         }
 
@@ -509,7 +518,7 @@ namespace Oxide.Plugins
         {
             CancelCountdown();
             _raveActive = false;
-            BroadcastChat(_config.EndedMessage);
+            BroadcastChat(_config.EndedMessage, _config.EndedSound);
             player.ChatMessage("<color=#ff0044>[RAVE]</color> Rave ended.");
         }
 
@@ -527,10 +536,20 @@ namespace Oxide.Plugins
             _countdownTimers.Clear();
         }
 
-        private void BroadcastChat(string message)
+        private void BroadcastChat(string message, string sound = null)
         {
             foreach (var p in BasePlayer.activePlayerList)
+            {
                 p.ChatMessage(message);
+                if (!string.IsNullOrEmpty(sound))
+                    PlaySoundAtPlayer(p, sound);
+            }
+        }
+
+        private void PlaySoundAtPlayer(BasePlayer player, string prefab)
+        {
+            var effect = new Effect(prefab, player.transform.position, Vector3.zero);
+            EffectNetwork.Send(effect, player.net.connection);
         }
 
         private string FormatCoords(Vector3 pos)
