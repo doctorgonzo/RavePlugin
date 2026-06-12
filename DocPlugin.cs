@@ -702,8 +702,14 @@ namespace Oxide.Plugins
                     }
                     else
                     {
+                        box.ServerTogglePlay(false);
                         box.CurrentRadioIp = url;
-                        box.ServerTogglePlay(true);
+                        box.baseEntity.SendNetworkUpdateImmediate();
+                        timer.Once(0.5f, () =>
+                        {
+                            if (box != null)
+                                box.ServerTogglePlay(true);
+                        });
                     }
 
                     boombox.SendNetworkUpdateImmediate();
