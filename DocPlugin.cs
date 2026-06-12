@@ -36,6 +36,18 @@ namespace Oxide.Plugins
                 ["chillout"] = "http://ice2.somafm.com/illstreet-128-mp3"
             };
 
+            [JsonProperty("Countdown steps (seconds)")]
+            public List<int> CountdownSteps { get; set; } = new List<int> { 300, 120, 60, 30, 10 };
+
+            [JsonProperty("Announcement message")]
+            public string AnnounceMessage { get; set; } = "<size=18><color=#ff0044>★ RAVE INCOMING ★</color></size>\n<color=#00ffcc>{time}</color> until the drop!\nLocation: <color=#ffcc00>{coords}</color>\nGet there or get left behind.";
+
+            [JsonProperty("Rave started message")]
+            public string StartedMessage { get; set; } = "<size=22><color=#ff0044>★ THE RAVE IS LIVE ★</color></size>\n<color=#00ffcc>Location: {coords}</color>\nLights up. Music on. Let's go.";
+
+            [JsonProperty("Rave ended message")]
+            public string EndedMessage { get; set; } = "<size=18><color=#ff0044>★ RAVE OVER ★</color></size>\nThanks for coming. See you next time.";
+
             [JsonProperty("Patterns")]
             public Dictionary<string, PatternConfig> Patterns { get; set; } = new Dictionary<string, PatternConfig>
             {
@@ -84,6 +96,9 @@ namespace Oxide.Plugins
         private int _chaseIndex;
         private bool _toggleState;
         private string _dataFile = "DocPlugin_Zones";
+        private List<Timer> _countdownTimers = new List<Timer>();
+        private bool _raveActive;
+        private Vector3 _raveLocation;
 
         #endregion
 
@@ -98,6 +113,7 @@ namespace Oxide.Plugins
         private void Unload()
         {
             StopPattern();
+            CancelCountdown();
             SaveZoneData();
         }
 
@@ -188,6 +204,15 @@ namespace Oxide.Plugins
                     break;
                 case "patterns":
                     CmdPatterns(player);
+                    break;
+                case "start":
+                    CmdStart(player, args);
+                    break;
+                case "end":
+                    CmdEnd(player);
+                    break;
+                case "cancel":
+                    CmdCancel(player);
                     break;
                 default:
                     ShowHelp(player);
@@ -413,6 +438,119 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Announcements
+
+        private void CmdStart(BasePlayer player, string[] args)
+        {
+            if (_raveActive)
+            {
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> A rave is already active. Use <color=#00ffcc>/rave end</color> first.");
+                return;
+            }
+
+            int countdown = 300;
+            if (args.Length > 1)
+            {
+                if (!int.TryParse(args[1], out countdown) || countdown < 0)
+                {
+                    player.ChatMessage("<color=#ff0044>[RAVE]</color> Usage: <color=#00ffcc>/rave start [seconds]</color> (default 300)");
+                    return;
+                }
+            }
+
+            _raveLocation = player.transform.position;
+            string coords = FormatCoords(_raveLocation);
+
+            if (countdown == 0)
+            {
+                _raveActive = true;
+                string msg = _config.StartedMessage
+                    .Replace("{coords}", coords);
+                BroadcastChat(msg);
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> Rave is live!");
+                return;
+            }
+
+            CancelCountdown();
+
+            foreach (int step in _config.CountdownSteps)
+            {
+                if (step > countdown) continue;
+                int delay = countdown - step;
+                var t = timer.Once(delay, () =>
+                {
+                    string timeStr = FormatTime(step);
+                    string msg = _config.AnnounceMessage
+                        .Replace("{time}", timeStr)
+                        .Replace("{coords}", coords);
+                    BroadcastChat(msg);
+                });
+                _countdownTimers.Add(t);
+            }
+
+            var startTimer = timer.Once(countdown, () =>
+            {
+                _raveActive = true;
+                string msg = _config.StartedMessage
+                    .Replace("{coords}", coords);
+                BroadcastChat(msg);
+                _countdownTimers.Clear();
+            });
+            _countdownTimers.Add(startTimer);
+
+            string firstMsg = _config.AnnounceMessage
+                .Replace("{time}", FormatTime(countdown))
+                .Replace("{coords}", coords);
+            BroadcastChat(firstMsg);
+            player.ChatMessage($"<color=#ff0044>[RAVE]</color> Countdown started — {FormatTime(countdown)} until showtime.");
+        }
+
+        private void CmdEnd(BasePlayer player)
+        {
+            CancelCountdown();
+            _raveActive = false;
+            BroadcastChat(_config.EndedMessage);
+            player.ChatMessage("<color=#ff0044>[RAVE]</color> Rave ended.");
+        }
+
+        private void CmdCancel(BasePlayer player)
+        {
+            CancelCountdown();
+            _raveActive = false;
+            player.ChatMessage("<color=#ff0044>[RAVE]</color> Countdown cancelled.");
+        }
+
+        private void CancelCountdown()
+        {
+            foreach (var t in _countdownTimers)
+                t?.Destroy();
+            _countdownTimers.Clear();
+        }
+
+        private void BroadcastChat(string message)
+        {
+            foreach (var p in BasePlayer.activePlayerList)
+                p.ChatMessage(message);
+        }
+
+        private string FormatCoords(Vector3 pos)
+        {
+            return $"({pos.x:F0}, {pos.y:F0}, {pos.z:F0})";
+        }
+
+        private string FormatTime(int seconds)
+        {
+            if (seconds >= 60)
+            {
+                int mins = seconds / 60;
+                int secs = seconds % 60;
+                return secs > 0 ? $"{mins}m {secs}s" : $"{mins}m";
+            }
+            return $"{seconds}s";
+        }
+
+        #endregion
+
         #region Pattern Engine
 
         private void RunPattern(PatternConfig pattern)
@@ -576,6 +714,10 @@ namespace Oxide.Plugins
             player.ChatMessage("<color=#00ffcc>/rave station <name> [zone]</color> — Play a station");
             player.ChatMessage("<color=#00ffcc>/rave stations</color> — List stations");
             player.ChatMessage("<color=#00ffcc>/rave mute [zone]</color> — Stop music");
+            player.ChatMessage("<color=#ff0044>── Announcements ──</color>");
+            player.ChatMessage("<color=#00ffcc>/rave start [seconds]</color> — Countdown + announce (default 5m)");
+            player.ChatMessage("<color=#00ffcc>/rave end</color> — Announce rave is over");
+            player.ChatMessage("<color=#00ffcc>/rave cancel</color> — Cancel countdown silently");
         }
 
         #endregion
