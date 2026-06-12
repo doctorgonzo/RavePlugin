@@ -108,6 +108,7 @@ namespace Oxide.Plugins
         private string _dataFile = "DocPlugin_Zones";
         private List<Timer> _countdownTimers = new List<Timer>();
         private bool _raveActive;
+        private bool _countdownActive;
         private Vector3 _raveLocation;
 
         #endregion
@@ -526,9 +527,9 @@ namespace Oxide.Plugins
 
         private void CmdStart(BasePlayer player, string[] args)
         {
-            if (_raveActive)
+            if (_raveActive || _countdownActive)
             {
-                player.ChatMessage("<color=#ff0044>[RAVE]</color> A rave is already active. Use <color=#00ffcc>/rave end</color> first.");
+                player.ChatMessage("<color=#ff0044>[RAVE]</color> A rave is already active or counting down. Use <color=#00ffcc>/rave end</color> or <color=#00ffcc>/rave cancel</color> first.");
                 return;
             }
 
@@ -556,6 +557,7 @@ namespace Oxide.Plugins
             }
 
             CancelCountdown();
+            _countdownActive = true;
 
             string firstMsg = _config.AnnounceMessage
                 .Replace("{time}", FormatTime(countdown))
@@ -579,6 +581,7 @@ namespace Oxide.Plugins
 
             var startTimer = timer.Once(countdown, () =>
             {
+                _countdownActive = false;
                 _raveActive = true;
                 string msg = _config.StartedMessage
                     .Replace("{coords}", coords);
@@ -607,6 +610,7 @@ namespace Oxide.Plugins
 
         private void CancelCountdown()
         {
+            _countdownActive = false;
             foreach (var t in _countdownTimers)
                 t?.Destroy();
             _countdownTimers.Clear();
