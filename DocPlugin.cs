@@ -239,9 +239,9 @@ namespace Oxide.Plugins
             float radius = _config.ScanRadius;
 
             if (!_zones.ContainsKey(zone))
-                _zones[zone] = new List<uint>();
+                _zones[zone] = new List<ulong>();
             if (!_boomboxZones.ContainsKey(zone))
-                _boomboxZones[zone] = new List<uint>();
+                _boomboxZones[zone] = new List<ulong>();
 
             int lightCount = 0;
             int boomboxCount = 0;
