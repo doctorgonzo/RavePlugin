@@ -683,7 +683,7 @@ namespace Oxide.Plugins
 
         private int SetBoomboxes(string url, string zone)
         {
-            int count = 0;
+            var boomboxes = new List<DeployableBoomBox>();
 
             foreach (var kvp in _boomboxZones)
             {
@@ -692,39 +692,35 @@ namespace Oxide.Plugins
                 {
                     var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseEntity;
                     var boombox = entity as DeployableBoomBox;
-                    if (boombox == null) continue;
-
-                    var box = boombox.BoxController;
-                    if (box == null) continue;
-
-                    if (url == null)
-                    {
-                        box.ServerTogglePlay(false);
-                        boombox.SendNetworkUpdateImmediate();
-                    }
-                    else
-                    {
-                        box.ServerTogglePlay(false);
-                        box.CurrentRadioIp = url;
-                        boombox.SendNetworkUpdateImmediate();
-                        float delay = 1.0f + (count * 0.25f);
-                        var capturedBox = box;
-                        var capturedBoombox = boombox;
-                        timer.Once(delay, () =>
-                        {
-                            if (capturedBox != null && capturedBoombox != null && !capturedBoombox.IsDestroyed)
-                            {
-                                capturedBox.ServerTogglePlay(true);
-                                capturedBoombox.SendNetworkUpdateImmediate();
-                            }
-                        });
-                    }
-
-                    count++;
+                    if (boombox == null || boombox.IsDestroyed) continue;
+                    if (boombox.BoxController == null) continue;
+                    boomboxes.Add(boombox);
                 }
             }
 
-            return count;
+            foreach (var boombox in boomboxes)
+            {
+                boombox.BoxController.ServerTogglePlay(false);
+                if (url != null)
+                    boombox.BoxController.CurrentRadioIp = url;
+                boombox.SendNetworkUpdateImmediate();
+            }
+
+            if (url != null && boomboxes.Count > 0)
+            {
+                timer.Once(2.0f, () =>
+                {
+                    foreach (var boombox in boomboxes)
+                    {
+                        if (boombox == null || boombox.IsDestroyed) continue;
+                        if (boombox.BoxController == null) continue;
+                        boombox.BoxController.ServerTogglePlay(true);
+                        boombox.SendNetworkUpdateImmediate();
+                    }
+                });
+            }
+
+            return boomboxes.Count;
         }
 
         #endregion
