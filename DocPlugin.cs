@@ -29,7 +29,7 @@ namespace Oxide.Plugins
             [JsonProperty("Stations")]
             public Dictionary<string, string> Stations { get; set; } = new Dictionary<string, string>
             {
-                ["dnb"] = "http://chi.bassdrive.co/;stream/1",
+                ["dnb"] = "http://ice1.somafm.com/dubstep-128-mp3",
                 ["techno"] = "http://ice1.somafm.com/thetrip-128-mp3",
                 ["house"] = "http://ice1.somafm.com/beatblender-128-mp3",
                 ["ambient"] = "http://ice1.somafm.com/dronezone-128-mp3",
@@ -140,13 +140,28 @@ namespace Oxide.Plugins
         {
             if (_config.Stations.Count == 0) return;
 
+            // The list is flat comma-separated Name,URL pairs, and the console
+            // treats ';' as a command separator — either character inside a
+            // name or URL corrupts the whole station list for every client.
             var parts = new List<string>();
+            int skipped = 0;
             foreach (var kvp in _config.Stations)
+            {
+                if (kvp.Key.IndexOfAny(new[] { ',', ';', '"' }) >= 0 ||
+                    kvp.Value.IndexOfAny(new[] { ',', ';', '"', ' ' }) >= 0)
+                {
+                    PrintWarning($"Station '{kvp.Key}' skipped: name or URL contains ',' ';' '\"' or whitespace, which would corrupt boombox.serverurllist");
+                    skipped++;
+                    continue;
+                }
                 parts.Add($"{kvp.Key},{kvp.Value}");
+            }
+
+            if (parts.Count == 0) return;
 
             string list = string.Join(",", parts);
             ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), "boombox.serverurllist", list);
-            Puts($"Registered {_config.Stations.Count} stations in boombox.serverurllist");
+            Puts($"Registered {parts.Count} stations in boombox.serverurllist" + (skipped > 0 ? $" ({skipped} skipped)" : ""));
         }
 
         #endregion
