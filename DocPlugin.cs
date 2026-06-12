@@ -702,7 +702,10 @@ namespace Oxide.Plugins
             {
                 boombox.BoxController.ServerTogglePlay(false);
                 if (url != null)
+                {
+                    EjectCassette(boombox);
                     boombox.BoxController.CurrentRadioIp = url;
+                }
                 boombox.SendNetworkUpdateImmediate();
             }
 
@@ -721,6 +724,19 @@ namespace Oxide.Plugins
             }
 
             return boomboxes.Count;
+        }
+
+        // A loaded cassette overrides the radio URL, so pop it out before playing
+        private void EjectCassette(DeployableBoomBox boombox)
+        {
+            var inv = boombox.inventory;
+            if (inv == null) return;
+
+            for (int i = inv.itemList.Count - 1; i >= 0; i--)
+            {
+                var item = inv.itemList[i];
+                item.Drop(boombox.transform.position + Vector3.up * 0.5f, Vector3.up);
+            }
         }
 
         #endregion
