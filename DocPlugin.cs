@@ -557,9 +557,14 @@ namespace Oxide.Plugins
 
             CancelCountdown();
 
+            string firstMsg = _config.AnnounceMessage
+                .Replace("{time}", FormatTime(countdown))
+                .Replace("{coords}", coords);
+            BroadcastChat(firstMsg, _config.CountdownSound);
+
             foreach (int step in _config.CountdownSteps)
             {
-                if (step > countdown) continue;
+                if (step >= countdown) continue;
                 int delay = countdown - step;
                 var t = timer.Once(delay, () =>
                 {
@@ -582,10 +587,6 @@ namespace Oxide.Plugins
             });
             _countdownTimers.Add(startTimer);
 
-            string firstMsg = _config.AnnounceMessage
-                .Replace("{time}", FormatTime(countdown))
-                .Replace("{coords}", coords);
-            BroadcastChat(firstMsg, _config.CountdownSound);
             player.ChatMessage($"<color=#ff0044>[RAVE]</color> Countdown started — {FormatTime(countdown)} until showtime.");
         }
 
